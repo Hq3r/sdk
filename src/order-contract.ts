@@ -39,6 +39,18 @@ export class OrderContract {
   }
 
   validate(proposition: string): boolean {
-    return proposition?.length === this.proposition.length && proposition.endsWith(this.template);
+    if (proposition?.length !== this.proposition.length) return false;
+    if (!proposition.endsWith(this.template)) return false;
+
+    // A contract without a quote token placeholder (the unimplemented T2T limit stub)
+    // has nothing to substitute, so only the exact tree is valid.
+    if (this.#quotePlaceholder.index < 0) return proposition === this.proposition;
+
+    // The template check ignores constants, so also require every byte outside the
+    // quote token id to equal the canonical tree. This rejects trees with another
+    // header or modified constants (for example a price floor changed from 0L to -1L).
+    const quoteId = this.getQuoteId(proposition);
+    if (!/^[0-9a-f]{64}$/.test(quoteId)) return false;
+    return proposition === this.new(quoteId);
   }
 }

@@ -36,6 +36,10 @@
     // lets the owner recover a malformed box instead of locking it forever.
     val price = SELF.R5[Long].get;          // price in nanoergs
     val isBuyAction = SELF.R6[Boolean].get; // true if this is a buy order, false if sell order
+
+    // A zero or negative price would make "required payment" zero or negative, so a
+    // taker could empty a token-holding box for ~nothing. Only positive prices trade.
+    val validPrice = price > 0L;
     val childBox = OUTPUTS(childBoxIndex.get);
 
     val selfToken = SELF.tokens.getOrElse(T, EMPTY_TOKEN);
@@ -99,7 +103,7 @@
       validSell                   // return the result of the sell validation
     }
 
-    sigmaProp(validRecreation && validExchange)
+    sigmaProp(validPrice && validRecreation && validExchange)
   } else {
     // ============================= //
     // The user is CLOSING the order //

@@ -476,6 +476,20 @@ describe("LimitOrder", () => {
       ).toThrow("Quote asset cannot be ERG");
     });
 
+    it("throws when price is negative", () => {
+      expect(() =>
+        LimitOrder.create({
+          owner: owner.address,
+          type: "buy",
+          assets: {
+            base: { tokenId: "ERG", amount: 0n },
+            quote: { tokenId: SIGUSD_TOKEN_ID, amount: 10n },
+          },
+          price: -5n,
+        }),
+      ).toThrow("Quote token price must be a positive number");
+    });
+
     it("throws when price is zero", () => {
       expect(() =>
         LimitOrder.create({
@@ -487,7 +501,7 @@ describe("LimitOrder", () => {
           },
           price: 0n,
         }),
-      ).toThrow("Quote token price must be specified");
+      ).toThrow("Quote token price must be a positive number");
     });
 
     it("throws for a buy order without quote amount", () => {

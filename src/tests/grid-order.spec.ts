@@ -1,8 +1,13 @@
 import type { Box } from "@fleet-sdk/common";
 import { first } from "@fleet-sdk/common";
-import { OutputBuilder, SAFE_MIN_BOX_VALUE, type R4ToR5Registers } from "@fleet-sdk/core";
+import {
+  OutputBuilder,
+  SAFE_MIN_BOX_VALUE,
+  TransactionBuilder,
+  type R4ToR5Registers,
+} from "@fleet-sdk/core";
 import { MockChain, mockUTxO } from "@fleet-sdk/mock-chain";
-import { SGroupElement, SLong, SSigmaProp } from "@fleet-sdk/serializer";
+import { SGroupElement, SInt, SLong, SSigmaProp } from "@fleet-sdk/serializer";
 import { describe, expect, it } from "vitest";
 
 import { GridOrder } from "../grid-order";
@@ -334,6 +339,19 @@ describe("GridOrder", () => {
       ).toThrow("At least one of base or quote assets must be specified");
     });
 
+    it("throws when prices are negative", () => {
+      expect(() =>
+        GridOrder.create({
+          owner: owner.address,
+          assets: {
+            base: { tokenId: "ERG", amount: ONE_ERG },
+            quote: { tokenId: SIGUSD_TOKEN_ID, amount: 100n },
+          },
+          prices: { buy: -1n, sell: -2n },
+        }),
+      ).toThrow("Grid prices must be positive");
+    });
+
     it("throws when buy price is zero", () => {
       expect(() =>
         GridOrder.create({
@@ -407,6 +425,51 @@ describe("GridOrder", () => {
       const order = makeE2TOrder(ONE_ERG, 100n, { buy: 13n, sell: 7n });
       expect(order.price.buy).toBe(13n);
       expect(order.price.sell).toBe(7n);
+    });
+  });
+
+  describe("recreated order output", () => {
+    const taker = chain.newParty("Taker");
+
+    function dirtyE2TOrder(): GridOrder {
+      const clean = makeE2TOrder(ONE_ERG, 100n);
+      return new GridOrder(
+        mockUTxO({
+          ...clean.box,
+          assets: [...clean.box.assets, { tokenId: FAKE_TOKEN_ID, amount: 7n }],
+          additionalRegisters: {
+            ...clean.box.additionalRegisters,
+            R7: SInt(1).toHex(),
+            R8: SInt(2).toHex(),
+          },
+        }) as Box<bigint, R4ToR5Registers>,
+      );
+    }
+
+    it("does not carry junk tokens or registers into the next order box (buy)", () => {
+      taker.addBalance({ nanoergs: 10n * ONE_ERG });
+      const tx = new TransactionBuilder(chain.height)
+        .extend(dirtyE2TOrder().buy(1n))
+        .from(taker.utxos)
+        .sendChangeTo(taker.address)
+        .build();
+
+      const child = tx.outputs[0];
+      expect(child.assets.map((a) => a.tokenId)).toEqual([SIGUSD_TOKEN_ID]);
+      expect(Object.keys(child.additionalRegisters).sort()).toEqual(["R4", "R5", "R6"]);
+    });
+
+    it("does not carry junk tokens or registers into the next order box (sell)", () => {
+      taker.addBalance({ nanoergs: ONE_ERG, tokens: [{ tokenId: SIGUSD_TOKEN_ID, amount: 5n }] });
+      const tx = new TransactionBuilder(chain.height)
+        .extend(dirtyE2TOrder().sell(1n))
+        .from(taker.utxos)
+        .sendChangeTo(taker.address)
+        .build();
+
+      const child = tx.outputs[0];
+      expect(child.assets.map((a) => a.tokenId)).toEqual([SIGUSD_TOKEN_ID]);
+      expect(Object.keys(child.additionalRegisters).sort()).toEqual(["R4", "R5", "R6"]);
     });
   });
 });

@@ -1,7 +1,10 @@
 import type { Amount, Box } from "@fleet-sdk/common";
 import {
+  ErgoUnsignedInput,
   OutputBuilder,
   SAFE_MIN_BOX_VALUE,
+  SByte,
+  SColl,
   SGroupElement,
   SInt,
   SLong,
@@ -440,6 +443,48 @@ describe("Limit order | erg <-> token", () => {
 
     expect(() => chain.execute(childCloseTx, { signers: [bob] })).not.toThrow();
   });
+
+  for (const badPrice of [0n, -5n]) {
+    it(`Should reject trading a token-holding order whose price is ${badPrice}`, () => {
+      // arrange: a legitimately created buy-type order whose price register is then set to a bad value
+      const order = mockLimitOrder("buy", { owner: bob, assets: { quote: 100n }, price: 5n });
+      // build the box directly so the bad price is part of the box (the SDK refuses to create it)
+      const box = mockUTxO(
+        new OutputBuilder(order.box.value, order.box.ergoTree)
+          .addTokens(order.box.assets)
+          .setAdditionalRegisters({
+            R4: order.box.additionalRegisters.R4,
+            R5: SLong(badPrice),
+            R6: order.box.additionalRegisters.R6,
+          })
+          .setCreationHeight(1)
+          .build(),
+      );
+
+      contract.addUTxOs(box);
+      alice.addBalance({ nanoergs: ONE_ERG });
+      chain.addParty(bob);
+
+      // act: take every token for 1 nanoerg and pay the owner
+      const transaction = new TransactionBuilder(chain.height)
+        .extend(({ addInputs, addOutputs }) => {
+          const length = addOutputs(
+            new OutputBuilder(box.value + 1n, bob.address).setAdditionalRegisters({
+              R4: SColl(SByte, box.boxId),
+            }),
+          );
+          addInputs(new ErgoUnsignedInput(box).setContextExtension({ 0: SInt(length - 1) }));
+        })
+        .from(alice.utxos)
+        .sendChangeTo(alice.address)
+        .build();
+
+      // assert
+      expect(() => chain.execute(transaction, { signers: [alice] })).toThrow(
+        REDUCED_TO_FALSE_ERROR,
+      );
+    });
+  }
 
   it("Should not allow a third party to close the order", () => {
     // arrange

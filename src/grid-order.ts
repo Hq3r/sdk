@@ -25,6 +25,7 @@ import {
 } from "@fleet-sdk/serializer";
 
 import { OrderContract } from "./order-contract";
+import { recreateOrderOutput } from "./recreate";
 import { validateToken } from "./tokens";
 import type { ActionHandler, BuySellOrder, ExchangeableAssets, PriceRange } from "./types";
 
@@ -115,7 +116,13 @@ export class GridOrder implements BuySellOrder<PriceRange> {
       const requiredBase = amount * this.#price.buy;
 
       const input = new ErgoUnsignedInput(box);
-      const output = OutputBuilder.from(box);
+      const output = recreateOrderOutput(
+        box,
+        this.#contract.type === "E2T"
+          ? [this.#assets.quote.tokenId]
+          : [this.#assets.base.tokenId, this.#assets.quote.tokenId],
+        ["R4", "R5"],
+      );
 
       if (this.#contract.type === "E2T") {
         output
@@ -156,7 +163,13 @@ export class GridOrder implements BuySellOrder<PriceRange> {
       const basePayout = amount * this.#price.sell;
 
       const input = new ErgoUnsignedInput(box);
-      const output = OutputBuilder.from(box);
+      const output = recreateOrderOutput(
+        box,
+        this.#contract.type === "E2T"
+          ? [this.#assets.quote.tokenId]
+          : [this.#assets.base.tokenId, this.#assets.quote.tokenId],
+        ["R4", "R5"],
+      );
 
       if (this.#contract.type === "E2T") {
         output
@@ -196,6 +209,8 @@ export class GridOrder implements BuySellOrder<PriceRange> {
       throw Error("At least one of base or quote assets must be specified");
     if (!options.prices.buy || !options.prices.sell)
       throw Error("Prices must be specified for both buy and sell");
+    if (options.prices.buy <= 0n || options.prices.sell <= 0n)
+      throw Error("Grid prices must be positive");
     if (options.prices.buy < options.prices.sell)
       throw Error("Unsafe grid spread: taker buy price must be greater than or equal to taker sell price");
 

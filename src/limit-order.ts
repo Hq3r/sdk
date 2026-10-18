@@ -21,12 +21,13 @@ import {
 } from "@fleet-sdk/serializer";
 
 import { OrderContract } from "./order-contract";
+import { recreateOrderOutput } from "./recreate";
 import { validateToken } from "./tokens";
 import type { ActionHandler, BuySellOrder, ExchangeableAssets } from "./types";
 
 const CONTRACTS = {
   E2T: new OrderContract(
-    "19aa02080e20cafe05e06b54b00eb0067c7c5e900c4d394030f4ac2e351f873a28f6158ced6e05000400040005000580897a05000500d804d601e30004d6027300d603860272027301d604e4c6a7040895e67201d807d605e4c6a70601d606b2a5e4720100d607b2db630872067302017203d6088c720702d6098c720701d60ae4c6a70505d60b8cb2db6308a7730301720302d1ed95957205917208730492c172067305ededededed93c27206c2a7937209720293e4c672060408720493e4c672060505720a93e4c672060601720593e4c67206070ec5a7eded93c27206d0720493e4c67206040ec5a7ec72059372097202957205d801d60c99c17206c1a7ed91720c730692720c9c99720b7208720ad801d60c997208720bed91720c7307929c720c720a99c1a7c172067204",
+    "19b202090e20cafe05e06b54b00eb0067c7c5e900c4d394030f4ac2e351f873a28f6158ced6e050004000400050005000580897a05000500d804d601e30004d6027300d603860272027301d604e4c6a7040895e67201d807d605e4c6a70505d606e4c6a70601d607b2a5e4720100d608b2db630872077302017203d6098c720802d60a8c720801d60b8cb2db6308a7730301720302d1eded917205730495957206917209730592c172077306ededededed93c27207c2a793720a720293e4c672070408720493e4c672070505720593e4c672070601720693e4c67207070ec5a7eded93c27207d0720493e4c67207040ec5a7ec720693720a7202957206d801d60c99c17207c1a7ed91720c730792720c9c99720b72097205d801d60c997209720bed91720c7308929c720c720599c1a7c172077204",
     "E2T",
   ),
   T2T: new OrderContract("0000", "T2T"),
@@ -81,6 +82,7 @@ export class LimitOrder implements BuySellOrder {
 
     let price = SConstant.from<bigint>(box.additionalRegisters.R5);
     if (price.type.toString() !== "SLong") throw Error("Invalid price register");
+    if (price.data <= 0n) throw Error("Limit order price must be positive");
     this.#price = price.data;
 
     let type = SConstant.from<boolean>(box.additionalRegisters.R6);
@@ -133,7 +135,7 @@ export class LimitOrder implements BuySellOrder {
           throw Error("Not supported");
         }
       } else {
-        output = OutputBuilder.from(box);
+        output = recreateOrderOutput(box, [this.#assets.quote.tokenId], ["R4", "R5", "R6"]);
 
         if (this.#contract.type === "E2T") {
           output
@@ -188,7 +190,7 @@ export class LimitOrder implements BuySellOrder {
           throw Error("Not supported");
         }
       } else {
-        output = OutputBuilder.from(box);
+        output = recreateOrderOutput(box, [this.#assets.quote.tokenId], ["R4", "R5", "R6"]);
 
         if (this.#contract.type === "E2T") {
           output
@@ -219,7 +221,8 @@ export class LimitOrder implements BuySellOrder {
     const buy = options.type === "buy";
 
     if (assets.quote.tokenId === "ERG") throw Error("Quote asset cannot be ERG");
-    if (!options.price) throw Error("Quote token price must be specified");
+    if (options.price === undefined || options.price <= 0n)
+      throw Error("Quote token price must be a positive number");
     if (buy) {
       if (!assets.quote.amount) throw Error("Quote amount must be specified for buy orders");
     } else {
