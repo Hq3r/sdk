@@ -102,6 +102,42 @@ describe("Grid order | token <-> token | auto-compound", () => {
     );
   });
 
+  it("Should reject an inverted ask/bid spread on-chain", () => {
+    const valid = mockOrderBox({
+      owner: bob,
+      assets: { base: 200n, quote: 100n },
+      prices: { buy: 10n, sell: 5n },
+    });
+    const unsafe = mockUTxO({
+      ...valid,
+      additionalRegisters: {
+        ...valid.additionalRegisters,
+        R5: SColl(SLong, [5n, 10n]).toHex(),
+      },
+    }) as Box<bigint, R4ToR5Registers>;
+    contract.addUTxOs(unsafe);
+    alice.addBalance({ nanoergs: ONE_ERG, tokens: [sigusd(100n)] });
+
+    const child = OutputBuilder.from(unsafe)
+      .addTokens(sigusd(50n))
+      .addTokens(rsn(-10n))
+      .setAdditionalRegisters({ R6: SColl(SByte, unsafe.boxId) });
+    const input = new ErgoUnsignedInput(unsafe).setContextExtension({
+      0: SBool(true),
+      1: SInt(0),
+    });
+    const transaction = new TransactionBuilder(chain.height)
+      .from(input, { ensureInclusion: true })
+      .from(alice.utxos)
+      .to(child)
+      .sendChangeTo(alice.address)
+      .build();
+
+    expect(() => chain.execute(transaction, { signers: [alice] })).toThrow(
+      REDUCED_TO_FALSE_ERROR,
+    );
+  });
+
   it("Should partially buy quote tokens", () => {
     // arrange
     const prices = { buy: 10n, sell: 5n };
