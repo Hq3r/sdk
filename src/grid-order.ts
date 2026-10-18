@@ -30,11 +30,11 @@ import type { ActionHandler, BuySellOrder, ExchangeableAssets, PriceRange } from
 
 const CONTRACTS = {
   E2T: new OrderContract(
-    "1af401080e20cafe05e06b54b00eb0067c7c5e900c4d394030f4ac2e351f873a28f6158ced6e0500040004000500040005000402d804d601e30104d6027300d603860272027301d604e4c6a7040895e67201d805d605b2a5e4720100d606b2db630872057302017203d607e4c6a70511d6088cb2db6308a7730301720302d6098c720602d1ededededed93c27205c2a7938c720601720293e4c672050408720493e4c672050511720793e4c67205060ec5a795e4e30001d801d60a99c17205c1a7ed91720a730492720a9c9972087209b27207730500d801d60a9972097208ed91720a7306929c720ab2720773070099c1a7c172057204",
+    "19ab020f0e20cafe05e06b54b00eb0067c7c5e900c4d394030f4ac2e351f873a28f6158ced6e05000400040004040400050004020500040004020500040005000402d804d601e30104d6027300d603860272027301d604e4c6a7040895e67201d805d605e4c6a70511d606b2a5e4720100d607b2db630872067302017203d6088cb2db6308a7730301720302d6098c720702d1ededededed93b17205730491b27205730500730691b27205730700730892b27205730900b27205730a00edededed93c27206c2a7938c720701720293e4c672060408720493e4c672060511720593e4c67206060ec5a795e4e30001d801d60a99c17206c1a7ed91720a730b92720a9c9972087209b27205730c00d801d60a9972097208ed91720a730d929c720ab27205730e0099c1a7c172067204",
     "E2T",
   ),
   T2T: new OrderContract(
-    "1aab020a0e20cafe05e06b54b00eb0067c7c5e900c4d394030f4ac2e351f873a28f6158ced6e050004000400040204020500040005000402d804d601e30104d6027300d603860272027301d604e4c6a7040895e67201d80bd605b2a5e4720100d606db6308a7d607b27206730200d608db63087205d609b27208730300d60ab272087304017203d60be4c6a70511d60c8c720902d60d8c720702d60e8cb27206730501720302d60f8c720a02d1ededededededed93c27205c2a793c17205c1a7938c7207018c720901938c720a01720293e4c672050408720493e4c672050511720b93e4c67205060ec5a795e4e30001d801d61099720c720ded91721073069272109c99720e720fb2720b730700d801d61099720f720eed9172107308929c7210b2720b73090099720d720c7204",
+    "19ec02110e20cafe05e06b54b00eb0067c7c5e900c4d394030f4ac2e351f873a28f6158ced6e0500040004000402040204040400050004020500040004020500040005000402d804d601e30104d6027300d603860272027301d604e4c6a7040895e67201d80cd605db6308a7d606b27205730200d6078c720601d608e4c6a70511d609b2a5e4720100d60adb63087209d60bb2720a730300d60cb2720a7304017203d60d8c720b02d60e8c720602d60f8cb27205730501720302d6108c720c02d1ededed9472077202ededed93b17208730691b27208730700730891b27208730900730a92b27208730b00b27208730c00edededededed93c27209c2a793c17209c1a79372078c720b01938c720c01720293e4c672090408720493e4c672090511720893e4c67209060ec5a795e4e30001d801d61199720d720eed917211730d9272119c99720f7210b27208730e00d801d611997210720fed917211730f929c7211b2720873100099720e720d7204",
     "T2T",
   ),
 };
@@ -67,6 +67,7 @@ export class GridOrder implements BuySellOrder<PriceRange> {
       const baseId = this.#box.assets[0]?.tokenId;
       if (!baseId) throw Error("The base token is not specified in the box");
       if (!validateToken(quoteId, box, 1)) throw Error("Invalid quote token for the contract");
+      if (baseId === quoteId) throw Error("Base and quote assets must be different");
 
       this.#assets = {
         /* c8 ignore next 2 -- assets[0/1] always exist here: guarded by !baseId and validateToken above */
@@ -77,6 +78,10 @@ export class GridOrder implements BuySellOrder<PriceRange> {
 
     const prices = SConstant.from<[bigint, bigint]>(box.additionalRegisters.R5);
     if (prices.type.toString() !== "SColl[SLong]") throw Error("Invalid price register");
+    if (prices.data.length !== 2 || prices.data[0] <= 0n || prices.data[1] <= 0n)
+      throw Error("Grid prices must contain two positive values");
+    if (prices.data[0] < prices.data[1])
+      throw Error("Unsafe grid spread: taker buy price must be greater than or equal to taker sell price");
     this.#price = { buy: prices.data[0], sell: prices.data[1] };
   }
 
@@ -185,10 +190,14 @@ export class GridOrder implements BuySellOrder<PriceRange> {
   static create(options: GridOrderCreationParams): OutputBuilder {
     const assets = options.assets;
     if (assets.quote.tokenId === "ERG") throw Error("Quote asset cannot be ERG");
+    if (assets.base.tokenId === assets.quote.tokenId)
+      throw Error("Base and quote assets must be different");
     if (!assets?.base.amount && !assets?.quote.amount)
       throw Error("At least one of base or quote assets must be specified");
     if (!options.prices.buy || !options.prices.sell)
       throw Error("Prices must be specified for both buy and sell");
+    if (options.prices.buy < options.prices.sell)
+      throw Error("Unsafe grid spread: taker buy price must be greater than or equal to taker sell price");
 
     let builder: OutputBuilder;
     if (assets.base.tokenId === "ERG") {

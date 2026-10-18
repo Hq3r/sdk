@@ -41,6 +41,10 @@
     val prices = SELF.R5[Coll[Long]].get; // [buy, sell] prices
     val childBox = OUTPUTS(childBoxIndex.get);
 
+    // Takers buy at BUY (ask) and sell at SELL (bid). Requiring ask >= bid
+    // prevents a permissionless buy-low/sell-high loop against the same box.
+    val validPrices = prices.size == 2 && prices(BUY) > 0L && prices(SELL) > 0L && prices(BUY) >= prices(SELL);
+
     val selfToken = SELF.tokens.getOrElse(T, EMPTY_TOKEN);
     val childToken = childBox.tokens.getOrElse(T, EMPTY_TOKEN);
     val selfTokenAmount = selfToken._2;
@@ -87,7 +91,7 @@
       validSell                   // return the result of the sell validation
     }
 
-    sigmaProp(validRecreation && validExchange)
+    sigmaProp(validPrices && validRecreation && validExchange)
   } else {
     // ============================= //
     // The user is CLOSING the order //

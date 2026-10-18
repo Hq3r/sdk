@@ -43,6 +43,10 @@
     val prices = SELF.R5[Coll[Long]].get; // [buy, sell] prices
     val childBox = OUTPUTS(childBoxIndex.get);
 
+    // Takers buy at BUY (ask) and sell at SELL (bid). Requiring ask >= bid
+    // prevents a permissionless buy-low/sell-high loop against the same box.
+    val validPrices = prices.size == 2 && prices(BUY) > 0L && prices(SELL) > 0L && prices(BUY) >= prices(SELL);
+
     val selfBaseToken = SELF.tokens(BASE);
     val childBaseToken = childBox.tokens(BASE);
 
@@ -53,6 +57,10 @@
     val selfQuoteAmount = selfQuoteToken._2;
     val childBaseAmount = childBaseToken._2;
     val childQuoteAmount = childQuoteToken._2;
+
+    // A token cannot represent both sides of a pair. If both IDs are equal,
+    // duplicate token entries can make the independent balance deltas lie.
+    val validPair = selfBaseToken._1 != QUOTE_TOKEN_ID;
 
     val validRecreation =                                   // should be true if:
       childBox.propositionBytes == SELF.propositionBytes && // 1. preserve proposition
@@ -97,7 +105,7 @@
       validSell               // return the result of the sell validation
     }
 
-    sigmaProp(validRecreation && validExchange)
+    sigmaProp(validPair && validPrices && validRecreation && validExchange)
   } else {
     // ============================= //
     // The user is CLOSING the order //

@@ -1,5 +1,7 @@
 import type { Amount, Box } from "@fleet-sdk/common";
 import {
+  OutputBuilder,
+  SAFE_MIN_BOX_VALUE,
   SGroupElement,
   SInt,
   SLong,
@@ -7,7 +9,7 @@ import {
   TransactionBuilder,
   type R4ToR6Registers,
 } from "@fleet-sdk/core";
-import { MockChain } from "@fleet-sdk/mock-chain";
+import { MockChain, mockUTxO } from "@fleet-sdk/mock-chain";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { LimitOrder } from "../../limit-order";
@@ -263,7 +265,78 @@ describe("Limit order | erg <-> token", () => {
     });
   });
 
-  it("Should now allow stealing leftover nanoergs when fully filling a sell order", () => {
+  it("Should keep a sell fill partial when exactly the minimum box value remains", () => {
+    const price = 1n;
+    const order = mockLimitOrder("sell", {
+      owner: bob,
+      assets: { base: SAFE_MIN_BOX_VALUE * 2n },
+      price,
+    });
+
+    contract.addUTxOs(order.box);
+    alice.addBalance({ nanoergs: ONE_ERG, tokens: [sigusd(SAFE_MIN_BOX_VALUE)] });
+
+    const transaction = new TransactionBuilder(chain.height)
+      .extend(order.sell(SAFE_MIN_BOX_VALUE))
+      .from(alice.utxos)
+      .sendChangeTo(alice.address)
+      .build();
+
+    expect(chain.execute(transaction, { signers: [alice] })).toBe(true);
+    expect(contract.utxos.length).toBe(1);
+    expect(contract.balance).toStrictEqual({
+      nanoergs: SAFE_MIN_BOX_VALUE,
+      tokens: [sigusd(SAFE_MIN_BOX_VALUE)],
+    });
+  });
+
+  it("Should reject a full sell fill paid with a different token ID", () => {
+    const price = 10n;
+    const order = mockLimitOrder("sell", { owner: bob, assets: { base: 10000n }, price });
+
+    contract.addUTxOs(order.box);
+    alice.addBalance({ nanoergs: ONE_ERG, tokens: [sigusd(1000n), fakeToken(1000n)] });
+    chain.addParty(bob);
+
+    const transaction = new TransactionBuilder(chain.height)
+      .extend(
+        order.sell(999n, (output) =>
+          output.eject((candidate) => (candidate.tokens.at(0).tokenId = FAKE_TOKEN_ID)),
+        ),
+      )
+      .from(alice.utxos)
+      .sendChangeTo(alice.address)
+      .build();
+
+    expect(() => chain.execute(transaction, { signers: [alice] })).toThrow(
+      REDUCED_TO_FALSE_ERROR,
+    );
+  });
+
+  it("Should let the owner recover a malformed box without R6", () => {
+    const valid = mockLimitOrder("sell", { owner: bob, assets: { base: 10000n }, price: 10n });
+    const malformed = mockUTxO(
+      new OutputBuilder(ONE_ERG, valid.box.ergoTree)
+        .setAdditionalRegisters({
+          R4: SSigmaProp(SGroupElement(bob.key.publicKey)),
+          R5: SLong(10n),
+        })
+        .setCreationHeight(1)
+        .build(),
+    ) as Box<bigint, R4ToR6Registers>;
+
+    contract.addUTxOs(malformed);
+    chain.addParty(bob);
+    const transaction = new TransactionBuilder(chain.height)
+      .from(malformed)
+      .payFee(1_100_000n)
+      .sendChangeTo(bob.address)
+      .build();
+
+    expect(chain.execute(transaction, { signers: [bob] })).toBe(true);
+  });
+
+  it("Should not allow stealing leftover nanoergs when fully filling a sell order", () => {
     // arrange
     const price = 10n;
     const order = mockLimitOrder("sell", { owner: bob, assets: { base: 10000n }, price });

@@ -26,7 +26,7 @@ import type { ActionHandler, BuySellOrder, ExchangeableAssets } from "./types";
 
 const CONTRACTS = {
   E2T: new OrderContract(
-    "1a9d02080e20cafe05e06b54b00eb0067c7c5e900c4d394030f4ac2e351f873a28f6158ced6e05000400040005000580897a05000500d806d601e30004d6027300d603860272027301d604e4c6a70601d605e4c6a70408d606e4c6a7050595e67201d804d607b2a5e4720100d608b2db630872077302017203d6098c720802d60a8cb2db6308a7730301720302d1ed95957204917209730492c172077305ededededed93c27207c2a7938c720801720293e4c672070408720593e4c672070505720693e4c672070601720493e4c67207070ec5a7ed93c27207d0720593e4c67207040ec5a7957204d801d60b99c17207c1a7ed91720b730692720b9c99720a72097206d801d60b997209720aed91720b7307929c720b720699c1a7c172077205",
+    "19aa02080e20cafe05e06b54b00eb0067c7c5e900c4d394030f4ac2e351f873a28f6158ced6e05000400040005000580897a05000500d804d601e30004d6027300d603860272027301d604e4c6a7040895e67201d807d605e4c6a70601d606b2a5e4720100d607b2db630872067302017203d6088c720702d6098c720701d60ae4c6a70505d60b8cb2db6308a7730301720302d1ed95957205917208730492c172067305ededededed93c27206c2a7937209720293e4c672060408720493e4c672060505720a93e4c672060601720593e4c67206070ec5a7eded93c27206d0720493e4c67206040ec5a7ec72059372097202957205d801d60c99c17206c1a7ed91720c730692720c9c99720b7208720ad801d60c997208720bed91720c7307929c720c720a99c1a7c172067204",
     "E2T",
   ),
   T2T: new OrderContract("0000", "T2T"),
@@ -168,7 +168,11 @@ export class LimitOrder implements BuySellOrder {
       const input = new ErgoUnsignedInput(box);
       let output: OutputBuilder;
 
-      const fulfilling = SAFE_MIN_BOX_VALUE >= this.#assets.base.amount - basePayout;
+      // The contract treats a child with exactly SAFE_MIN_BOX_VALUE as a
+      // partial fill (`childBox.value >= SAFE_MIN_BOX_VALUE`). Keep the SDK's
+      // full-fill boundary identical so it never builds a transaction the
+      // contract rejects at the exact minimum.
+      const fulfilling = SAFE_MIN_BOX_VALUE > this.#assets.base.amount - basePayout;
       if (fulfilling) {
         const owner = SConstant.from<Uint8Array>(box.additionalRegisters.R4);
         if (owner.type.toString() !== "SSigmaProp") throw Error("Invalid owner register");

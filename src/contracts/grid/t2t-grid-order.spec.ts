@@ -4,6 +4,7 @@ import {
   OutputBuilder,
   SAFE_MIN_BOX_VALUE,
   SBool,
+  SByte,
   SColl,
   SGroupElement,
   SInt,
@@ -12,7 +13,7 @@ import {
   TransactionBuilder,
   type R4ToR5Registers,
 } from "@fleet-sdk/core";
-import { MockChain } from "@fleet-sdk/mock-chain";
+import { MockChain, mockUTxO } from "@fleet-sdk/mock-chain";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { GridOrder } from "../../grid-order";
@@ -64,18 +65,55 @@ describe("Grid order | token <-> token | auto-compound", () => {
     expect(contract.balance).toEqual({ nanoergs: 0n, tokens: [] });
   });
 
+  it("Should reject trading when base and quote use the same token ID", () => {
+    const valid = mockOrderBox({
+      owner: bob,
+      assets: { base: 100n, quote: 50n },
+      prices: { buy: 3n, sell: 2n },
+    });
+    const malicious = mockUTxO({
+      ...valid,
+      assets: [rsn(100n), rsn(50n)],
+    }) as Box<bigint, R4ToR5Registers>;
+    contract.addUTxOs(malicious);
+    alice.addBalance({ nanoergs: ONE_ERG });
+
+    const child = new OutputBuilder(malicious.value, malicious.ergoTree)
+      .addTokens([rsn(80n), rsn(60n)])
+      .setAdditionalRegisters({
+        R4: malicious.additionalRegisters.R4,
+        R5: malicious.additionalRegisters.R5,
+        R6: SColl(SByte, malicious.boxId),
+      });
+    const input = new ErgoUnsignedInput(malicious).setContextExtension({
+      0: SBool(false),
+      1: SInt(0),
+    });
+    const transaction = new TransactionBuilder(chain.height)
+      .from(input, { ensureInclusion: true })
+      .from(alice.utxos)
+      .to(child)
+      .to(new OutputBuilder(SAFE_MIN_BOX_VALUE, alice.address).addTokens(rsn(10n)))
+      .sendChangeTo(alice.address)
+      .build();
+
+    expect(() => chain.execute(transaction, { signers: [alice] })).toThrow(
+      REDUCED_TO_FALSE_ERROR,
+    );
+  });
+
   it("Should partially buy quote tokens", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 200n, quote: 100n }, prices }),
     );
 
     contract.addUTxOs(order.box);
-    alice.addBalance({ nanoergs: ONE_ERG, tokens: [sigusd(100n)] }); // Alice has 100 susd tokens
+    alice.addBalance({ nanoergs: ONE_ERG, tokens: [sigusd(200n)] }); // Alice has 200 susd tokens
 
     const BUY_AMOUNT = 10n; // buying 10 RSN
-    const PAY_AMOUNT = BUY_AMOUNT * prices.buy; // 10 * 5 = 50 SigUSD
+    const PAY_AMOUNT = BUY_AMOUNT * prices.buy; // 10 * 10 = 100 SigUSD
 
     const transaction = new TransactionBuilder(chain.height)
       .extend(order.buy(BUY_AMOUNT)) // buy
@@ -100,13 +138,13 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
     expect(alice.balance).toStrictEqual({
       nanoergs: ONE_ERG,
-      tokens: [sigusd(100n - PAY_AMOUNT), rsn(BUY_AMOUNT)],
+      tokens: [sigusd(200n - PAY_AMOUNT), rsn(BUY_AMOUNT)],
     });
   });
 
   it("Should fully buy quote tokens", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 200n, quote: 100n }, prices }),
     );
@@ -143,7 +181,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should partially sell quote tokens", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 1000n, quote: 200n }, prices }),
     );
@@ -152,7 +190,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
     alice.addBalance({ tokens: [rsn(100n)], nanoergs: ONE_ERG }); // Alice has 100 tokens to sell
 
     const SELL_AMOUNT = 10n; // selling 10 RSN
-    const RECEIVING_AMOUNT = SELL_AMOUNT * prices.sell; // 10 * 10 = 100 SigUSD
+    const RECEIVING_AMOUNT = SELL_AMOUNT * prices.sell; // 10 * 5 = 50 SigUSD
 
     const transaction = new TransactionBuilder(chain.height)
       .extend(order.sell(SELL_AMOUNT))
@@ -183,7 +221,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should fully sell quote tokens", () => {
     // arrange
-    const prices = { buy: 5n, sell: 11n };
+    const prices = { buy: 11n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 100n, quote: 200n }, prices }),
     );
@@ -209,7 +247,10 @@ describe("Grid order | token <-> token | auto-compound", () => {
     expect(contract.utxos.length).toBe(1);
     expect(contract.balance).toStrictEqual({
       nanoergs: order.box.value,
-      tokens: [sigusd(1n), rsn(order.assets.quote.amount + SELL_AMOUNT)], // contract now has 100 tokens from alice
+      tokens: [
+        sigusd(order.assets.base.amount - RECEIVING_AMOUNT),
+        rsn(order.assets.quote.amount + SELL_AMOUNT),
+      ],
     });
 
     expect(alice.balance).toStrictEqual({
@@ -224,7 +265,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
       mockOrderBox({
         owner: bob,
         assets: { base: 3000n, quote: 5000n },
-        prices: { buy: 5n, sell: 10n },
+        prices: { buy: 10n, sell: 5n },
       }),
     );
 
@@ -232,7 +273,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
       mockOrderBox({
         owner: bob,
         assets: { base: 200n, quote: 1000n },
-        prices: { buy: 7n, sell: 12n },
+        prices: { buy: 12n, sell: 7n },
       }),
     );
 
@@ -270,7 +311,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should allow operations in the child orders", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const fatherOrder = new GridOrder(
       mockOrderBox({ owner: bob, assets: { quote: 100n, base: 200n }, prices }),
     );
@@ -339,7 +380,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should not allow buying tokens when underpaying", () => {
     // arrange
-    const prices = { buy: 2n, sell: 10n };
+    const prices = { buy: 10n, sell: 2n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 1n, quote: 100n }, prices }),
     );
@@ -353,7 +394,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
       .sendChangeTo(alice.address)
       .build();
 
-    expect(transaction.outputs[0]?.assets[0]?.amount).toBe(20n); // should have 20 sigusd instead of 21
+    expect(transaction.outputs[0]?.assets[0]?.amount).toBe(100n); // should have 100 sigusd instead of 101
 
     // act
     expect(() => chain.execute(transaction, { signers: [alice] })).toThrow(REDUCED_TO_FALSE_ERROR);
@@ -361,7 +402,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should not allow selling tokens when underpaying", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(mockOrderBox({ owner: bob, assets: { base: 500n }, prices }));
 
     contract.addUTxOs(order.box);
@@ -381,13 +422,13 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should not allow buying when the Token ID is swapped", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 1n, quote: 100n }, prices }),
     );
 
     contract.addUTxOs(order.box);
-    alice.addBalance({ nanoergs: ONE_ERG, tokens: [sigusd(100n), fakeToken(200n)] });
+    alice.addBalance({ nanoergs: ONE_ERG, tokens: [sigusd(200n), fakeToken(200n)] });
 
     const transaction = new TransactionBuilder(chain.height)
       .extend(
@@ -404,7 +445,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should not allow selling when the quote Token ID is swapped", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 101n, quote: 100n }, prices }),
     );
@@ -427,7 +468,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should not allow selling when the base Token ID is swapped", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 101n, quote: 100n }, prices }),
     );
@@ -450,7 +491,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should not allow changing the owner of the order", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 1n, quote: 100n }, prices }),
     );
@@ -476,7 +517,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should not allow changing the prices of the order", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 1n, quote: 100n }, prices }),
     );
@@ -502,7 +543,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should not allow changing the order contract", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 1n, quote: 100n }, prices }),
     );
@@ -526,7 +567,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
 
   it("Should not allow spending multiple orders to a single child output", () => {
     // arrange
-    const prices = { buy: 5n, sell: 10n };
+    const prices = { buy: 10n, sell: 5n };
     const order1 = new GridOrder(
       mockOrderBox({ owner: bob, assets: { base: 1n, quote: 100n }, prices }),
     );
@@ -535,7 +576,7 @@ describe("Grid order | token <-> token | auto-compound", () => {
     );
 
     contract.addUTxOs(order1.box);
-    alice.addBalance({ nanoergs: ONE_ERG, tokens: [sigusd(100n), fakeToken(200n)] });
+    alice.addBalance({ nanoergs: ONE_ERG, tokens: [sigusd(200n), fakeToken(200n)] });
 
     const transaction = new TransactionBuilder(chain.height)
       .from(alice.utxos)

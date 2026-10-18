@@ -1,6 +1,6 @@
 {
   "name": "@nautls/machinafi-sdk",
-  "version": "0.1.0-alpha.0",
+  "version": "0.2.0-alpha.0",
   "private": false,
   "homepage": "https://github.com/machinafi/sdk#readme",
   "bugs": {
@@ -27,6 +27,7 @@
   },
   "scripts": {
     "build": "tsdown",
+    "compile:contracts": "node scripts/compile-contracts.mjs",
     "test:unit": "vitest --run",
     "test:cov": "vitest run --coverage",
     "watch:unit": "vitest",
